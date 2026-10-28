@@ -1,0 +1,51 @@
+name: 构建 StatMate Mac 安装包
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 安装依赖
+        run: python -m pip install '.[dev]'
+      - name: 自动化测试
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+      - name: 验证架构并打包
+        run: |
+          test "$(uname -m)" = '${{ matrix.arch }}'
+          bash scripts/build_macos.sh
+      - name: 启动真实应用并验证 DMG
+        run: |
+          dist/StatMate.app/Contents/MacOS/StatMate &
+          app_pid=$!
+          sleep 12
+          kill -0 "$app_pid"
+          kill "$app_pid"
+          hdiutil verify dist/StatMate-macOS-${{ matrix.arch }}.dmg
+          ditto -c -k --sequesterRsrc --keepParent dist/StatMate.app dist/StatMate-macOS-${{ matrix.arch }}.app.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StatMate-macOS-${{ matrix.arch }}
+          path: |
+            dist/*.dmg
+            dist/*.app.zip
+          if-no-files-found: error
